@@ -13,6 +13,10 @@ export interface RoomDirectMessageOptions {
   config?: GenerateContentConfig
   round?: number
   trigger?: 'user' | 'agent' | 'system'
+  // 是否把这条消息记入对外事件流。
+  recordMessage?: boolean
+  // room 内部编排用的提示词，不直接暴露给前端。
+  promptMessage?: string
 }
 
 export interface RoomConversationOptions {

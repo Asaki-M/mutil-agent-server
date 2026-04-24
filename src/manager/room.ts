@@ -41,9 +41,24 @@ function buildAgentPrompt(
   ].join('\n\n')
 }
 
+function buildRelayPrompt(
+  sourceAgentName: string,
+  message: string,
+  round: number,
+): string {
+  return [
+    '你正在当前协作会话中与其他 agent 配合。',
+    `当前是第 ${round} 轮交流。`,
+    `以下是 agent "${sourceAgentName}" 刚刚的真实回复，请你继续自然回应。`,
+    '要求：保持你自己的角色设定，不要复读，不要暴露系统编排信息，语气像真实对话。',
+    message,
+  ].join('\n\n')
+}
+
 export class Room {
   private readonly agents = new Map<string, SubAgent>()
-  private readonly events: RoomEvent[] = []
+  private readonly publicEvents: RoomEvent[] = []
+  private readonly internalEvents: RoomEvent[] = []
   private readonly listeners = new Set<RoomEventListener>()
   private workflowQueue = Promise.resolve()
 
@@ -98,7 +113,11 @@ export class Room {
   }
 
   getEvents(): RoomEvent[] {
-    return [...this.events]
+    return [...this.publicEvents]
+  }
+
+  getInternalEvents(): RoomEvent[] {
+    return [...this.internalEvents]
   }
 
   subscribe(listener: RoomEventListener): () => void {
@@ -115,16 +134,27 @@ export class Room {
     const trigger = options.trigger ?? 'user'
     const targetAgent = this.getAgent(options.toAgentName)
 
-    this.recordMessage({
-      from,
-      to: targetAgent.name,
-      message: options.message,
-      round,
-      trigger,
-    })
+    if (options.recordMessage !== false) {
+      this.recordMessage({
+        from,
+        to: targetAgent.name,
+        message: options.message,
+        round,
+        trigger,
+      })
+    }
+    else {
+      this.recordMessage({
+        from,
+        to: targetAgent.name,
+        message: options.message,
+        round,
+        trigger,
+      }, 'internal')
+    }
 
     const reply = await targetAgent.sendText({
-      message: buildAgentPrompt(options.message, options.fromAgentName, round),
+      message: options.promptMessage ?? buildAgentPrompt(options.message, options.fromAgentName, round),
       config: options.config,
     })
 
@@ -162,35 +192,67 @@ export class Room {
     )
 
     try {
-      let currentSpeaker = from
-      let currentMessage = options.message
+      let roundReplies: RoomReplyRecord[] = []
 
       for (let round = 1; round <= maxRounds; round += 1) {
-        const replies: RoomReplyRecord[] = []
+        const nextReplies: RoomReplyRecord[] = []
 
-        for (const agent of agents) {
-          if (agent.name === currentSpeaker) {
-            continue
-          }
-
-          const reply = await this.sendToAgent({
-            fromAgentName: currentSpeaker,
-            toAgentName: agent.name,
-            message: currentMessage,
-            config: options.config,
+        if (round === 1) {
+          // 用户消息只对外记录一次，后续发给各个 agent 属于 room 内部投递。
+          this.recordMessage({
+            from,
+            to: 'all',
+            message: options.message,
             round,
-            trigger: round === 1 ? 'user' : 'agent',
+            trigger: 'user',
           })
 
-          replies.push(reply)
+          for (const agent of agents) {
+            if (agent.name === from) {
+              continue
+            }
+
+            const reply = await this.sendToAgent({
+              fromAgentName: from,
+              toAgentName: agent.name,
+              message: options.message,
+              config: options.config,
+              round,
+              trigger: 'user',
+              recordMessage: false,
+            })
+
+            nextReplies.push(reply)
+          }
+        }
+        else {
+          for (const sourceReply of roundReplies) {
+            for (const agent of agents) {
+              if (agent.name === sourceReply.agentName) {
+                continue
+              }
+
+              const reply = await this.sendToAgent({
+                fromAgentName: sourceReply.agentName,
+                toAgentName: agent.name,
+                message: sourceReply.text,
+                promptMessage: buildRelayPrompt(sourceReply.agentName, sourceReply.text, round),
+                config: options.config,
+                round,
+                trigger: 'agent',
+                recordMessage: false,
+              })
+
+              nextReplies.push(reply)
+            }
+          }
         }
 
-        if (replies.length === 0) {
+        if (nextReplies.length === 0) {
           break
         }
 
-        currentSpeaker = replies[0].agentName
-        currentMessage = this.buildNextRoundMessage(replies, round)
+        roundReplies = nextReplies
       }
 
       this.recordStatusEvent(
@@ -203,17 +265,6 @@ export class Room {
       this.recordStatusEvent('conversation_failed', message)
       throw error
     }
-  }
-
-  private buildNextRoundMessage(replies: RoomReplyRecord[], round: number): string {
-    const content = replies
-      .map(reply => `${reply.agentName}：${reply.text}`)
-      .join('\n\n')
-
-    return [
-      `以下是第 ${round} 轮其他 agent 的回复，请继续给出你的回应。`,
-      content,
-    ].join('\n\n')
   }
 
   private normalizeMaxRounds(maxRounds?: number): number {
@@ -236,13 +287,14 @@ export class Room {
 
   private recordMessage(
     event: Omit<RoomMessageRecord, 'id' | 'timestamp' | 'type'>,
+    visibility: 'public' | 'internal' = 'public',
   ): RoomMessageRecord {
     return this.saveEvent({
       ...event,
       id: createRoomEventId('room_message'),
       type: 'message',
       timestamp: createTimestamp(),
-    })
+    }, visibility)
   }
 
   private recordReply(
@@ -269,10 +321,18 @@ export class Room {
     })
   }
 
-  // 房间级事件统一落在这里，SSE 和后续持久化都从这里取。
-  private saveEvent<T extends RoomEvent>(event: T): T {
-    this.events.push(event)
-    this.notifyListeners(event)
+  // 房间同时维护对外展示事件和内部完整事件。
+  private saveEvent<T extends RoomEvent>(
+    event: T,
+    visibility: 'public' | 'internal' = 'public',
+  ): T {
+    this.internalEvents.push(event)
+
+    if (visibility === 'public') {
+      this.publicEvents.push(event)
+      this.notifyListeners(event)
+    }
+
     return event
   }
 
