@@ -1,0 +1,25 @@
+src/manager/room.ts
+  331ed96a262f611e 44-57,60-61,116-120,137-154,157,195,198-205,207,210-248,251,255,290,297,324-334
+src/model/room.ts
+  331ed96a262f611e 16-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "ab9e3944df1dcdbce0b8f39c9dd0f9e7ab45ce9c",
+  "prompts": {
+    "331ed96a262f611e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dbd48-6056-7143-8c2e-9ff21bb255ec",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Qinghuan",
+      "messages": [],
+      "total_additions": 109,
+      "total_deletions": 45,
+      "accepted_lines": 109,
+      "overriden_lines": 0
+    }
+  }
+}
