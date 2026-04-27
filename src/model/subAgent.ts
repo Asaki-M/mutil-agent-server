@@ -1,5 +1,3 @@
-import type { GenerateContentResponse } from '@google/genai'
-
 export interface SubAgentOptions {
   // 子 agent 的唯一名称。
   name: string
@@ -11,5 +9,5 @@ export interface SubAgentOptions {
 export interface SubAgentTextReply {
   agentName: string
   text: string
-  response: GenerateContentResponse
+  response: unknown
 }

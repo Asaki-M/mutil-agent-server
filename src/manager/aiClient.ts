@@ -1,4 +1,4 @@
-import type { Chat, Content, CreateChatParameters } from '@google/genai'
+import type { Content, GenerateContentConfig } from '@google/genai'
 import { GoogleGenAI } from '@google/genai'
 import {
   GEMINI_MODEL,
@@ -13,6 +13,24 @@ const ai = new GoogleGenAI({
   location: GOOGLE_CLOUD_LOCATION,
 })
 
+interface SendModelMessageOptions {
+  model?: string
+  systemInstruction: string
+  contents: Content[]
+  config?: GenerateContentConfig
+}
+
+interface ModelTextResponse {
+  text: string
+  response: unknown
+}
+
+async function generateText(options: SendModelMessageOptions): Promise<string> {
+  const { text } = await sendModelMessage(options)
+
+  return text
+}
+
 function buildSystemInstruction(systemInstruction?: string): Content | undefined {
   if (systemInstruction == null || systemInstruction === '') {
     return undefined
@@ -23,17 +41,23 @@ function buildSystemInstruction(systemInstruction?: string): Content | undefined
   }
 }
 
-function createChatClient(options: { model?: string, systemInstruction: string }): Chat {
-  const params: CreateChatParameters = {
+async function sendModelMessage(options: SendModelMessageOptions): Promise<ModelTextResponse> {
+  const response = await ai.models.generateContent({
     model: options.model ?? GEMINI_MODEL,
+    contents: options.contents,
     config: {
+      ...options.config,
       systemInstruction: buildSystemInstruction(options.systemInstruction),
     },
-  }
+  })
 
-  return ai.chats.create(params)
+  return {
+    text: response.text ?? '',
+    response,
+  }
 }
 
 export {
-  createChatClient,
+  generateText,
+  sendModelMessage,
 }

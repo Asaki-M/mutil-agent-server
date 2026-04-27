@@ -7,7 +7,10 @@ import type {
   RoomStatusEvent,
 } from '../model/room'
 import type { SubAgentOptions } from '../model/subAgent'
+import { EventEmitter } from 'node:events'
 import { SubAgent } from './subAgent'
+
+const ROOM_EVENT = 'room_event'
 
 function hasText(value?: string): value is string {
   return value != null && value !== ''
@@ -55,7 +58,8 @@ function buildRelayPrompt(
 export class Room {
   private readonly agents = new Map<string, SubAgent>()
   private readonly events: RoomEvent[] = []
-  private readonly listeners = new Set<RoomEventListener>()
+  private readonly emitter = new EventEmitter()
+  // 串行执行会话，避免多次 /messages 请求同时改写同一个 room 状态。
   private workflowQueue = Promise.resolve()
 
   createAgent(options: SubAgentOptions): SubAgent {
@@ -92,14 +96,19 @@ export class Room {
   }
 
   subscribe(listener: RoomEventListener): () => void {
-    this.listeners.add(listener)
+    const eventListener = (event: RoomEvent) => {
+      Promise.resolve(listener(event)).catch(() => undefined)
+    }
+
+    this.emitter.on(ROOM_EVENT, eventListener)
 
     return () => {
-      this.listeners.delete(listener)
+      this.emitter.off(ROOM_EVENT, eventListener)
     }
   }
 
   async enqueueConversation(options: RoomConversationOptions): Promise<void> {
+    // 新会话接在上一段会话后面；上一段失败也不阻塞后续会话。
     this.workflowQueue = this.workflowQueue
       .catch(() => undefined)
       .then(async () => this.runConversation(options))
@@ -128,7 +137,7 @@ export class Room {
         const nextReplies: RoomReplyRecord[] = []
 
         if (round === 1) {
-          // 用户消息只对外记录一次，后续发给各个 agent 属于 room 内部投递。
+          // 第一轮：用户消息对外只展示一次，然后并行投递给每个 agent 独立处理。
           this.recordMessage({
             from,
             to: 'all',
@@ -137,25 +146,21 @@ export class Room {
             trigger: 'user',
           })
 
-          for (const agent of agents) {
-            if (agent.name === from) {
-              continue
-            }
+          const replies = await Promise.all(agents.map(async agent => this.sendToAgent(agent, {
+            from,
+            message: options.message,
+            config: options.config,
+            round,
+            trigger: 'user',
+          })))
 
-            const reply = await this.sendToAgent(agent, {
-              from,
-              message: options.message,
-              config: options.config,
-              round,
-              trigger: 'user',
-            })
-
-            nextReplies.push(reply)
-          }
+          nextReplies.push(...replies)
         }
         else {
+          // 后续轮次：上一轮每个 agent 的回复，会串行转发给其他所有 agent 继续接话。
           for (const sourceReply of roundReplies) {
             for (const agent of agents) {
+              // 不把 agent 自己刚说过的话再发回给它自己。
               if (agent.name === sourceReply.agentName) {
                 continue
               }
@@ -204,6 +209,8 @@ export class Room {
       trigger: RoomMessageRecord['trigger']
     },
   ): Promise<RoomReplyRecord> {
+    // 这里不记录 message 事件，避免前端看到 room 内部 fan-out 的重复投递。
+    // 前端只需要看到用户原始消息和每个 agent 的真实回复。
     const reply = await targetAgent.sendText({
       message: options.promptMessage ?? buildAgentPrompt(options.message, options.from, options.round),
       config: options.config,
@@ -269,14 +276,9 @@ export class Room {
 
   private saveEvent<T extends RoomEvent>(event: T): T {
     this.events.push(event)
-    this.notifyListeners(event)
+    // SSE 订阅者会在这里实时收到 status/message/reply。
+    this.emitter.emit(ROOM_EVENT, event)
     return event
-  }
-
-  private notifyListeners(event: RoomEvent): void {
-    for (const listener of this.listeners) {
-      Promise.resolve(listener(event)).catch(() => undefined)
-    }
   }
 }
 
