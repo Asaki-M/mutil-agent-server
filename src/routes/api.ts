@@ -2,7 +2,6 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { room } from '../manager/room'
 import {
-  buildHelloResponse,
   buildRoomEventSse,
   buildSseEvent,
   normalizeAgentInput,
@@ -10,13 +9,6 @@ import {
 } from '../service/api.service'
 
 const apiRoutes = new Hono()
-
-apiRoutes.get('/hello', (c) => {
-  const queryName = c.req.query('name')
-  const name = queryName == null || queryName === '' ? 'world' : queryName
-
-  return c.json(buildHelloResponse(name))
-})
 
 apiRoutes.get('/agents', c => c.json({
   agents: room.listAgents().map(agent => ({

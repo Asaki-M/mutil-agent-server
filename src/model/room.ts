@@ -1,23 +1,5 @@
 import type { GenerateContentConfig } from '@google/genai'
-import type { SubAgentOptions, SubAgentTextReply } from './subAgent'
-
-export interface RoomOptions {
-  // 初始化时可直接注入一组 agent。
-  agents?: SubAgentOptions[]
-}
-
-export interface RoomDirectMessageOptions {
-  message: string
-  toAgentName: string
-  fromAgentName?: string
-  config?: GenerateContentConfig
-  round?: number
-  trigger?: 'user' | 'agent' | 'system'
-  // 是否把这条消息记入对外事件流。
-  recordMessage?: boolean
-  // room 内部编排用的提示词，不直接暴露给前端。
-  promptMessage?: string
-}
+import type { SubAgentTextReply } from './subAgent'
 
 export interface RoomConversationOptions {
   message: string

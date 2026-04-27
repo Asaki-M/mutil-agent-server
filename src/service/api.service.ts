@@ -38,13 +38,6 @@ function formatSseData(data: unknown): string {
   return JSON.stringify(data, null, 2)
 }
 
-function buildHelloResponse(name: string) {
-  return {
-    message: `Hello, ${name}!`,
-    service: 'multi-agent-server',
-  }
-}
-
 function buildSseEvent(event: string, data: unknown, id?: string): SseEventPayload {
   return {
     event,
@@ -107,7 +100,6 @@ function normalizeMessageInput(input: unknown): SendMessageInput {
 }
 
 export {
-  buildHelloResponse,
   buildRoomEventSse,
   buildSseEvent,
   normalizeAgentInput,

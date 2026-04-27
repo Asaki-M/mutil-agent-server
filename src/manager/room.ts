@@ -1,16 +1,13 @@
 import type {
   RoomConversationOptions,
-  RoomDirectMessageOptions,
   RoomEvent,
   RoomEventListener,
   RoomMessageRecord,
-  RoomOptions,
   RoomReplyRecord,
   RoomStatusEvent,
 } from '../model/room'
 import type { SubAgentOptions } from '../model/subAgent'
-import type { SubAgent } from './subAgent'
-import { createSubAgent } from './subAgent'
+import { SubAgent } from './subAgent'
 
 function hasText(value?: string): value is string {
   return value != null && value !== ''
@@ -57,26 +54,18 @@ function buildRelayPrompt(
 
 export class Room {
   private readonly agents = new Map<string, SubAgent>()
-  private readonly publicEvents: RoomEvent[] = []
-  private readonly internalEvents: RoomEvent[] = []
+  private readonly events: RoomEvent[] = []
   private readonly listeners = new Set<RoomEventListener>()
   private workflowQueue = Promise.resolve()
 
-  constructor(options: RoomOptions = {}) {
-    for (const agentOptions of options.agents ?? []) {
-      this.createAgent(agentOptions)
+  createAgent(options: SubAgentOptions): SubAgent {
+    const agent = new SubAgent(options)
+    if (this.agents.has(agent.name)) {
+      throw new Error(`Agent "${agent.name}" already exists`)
     }
-  }
 
-  addAgent(agent: SubAgent): void {
-    this.assertAgentNameAvailable(agent.name)
     this.agents.set(agent.name, agent)
     this.recordStatusEvent('agent_added', `Agent "${agent.name}" added`)
-  }
-
-  createAgent(options: SubAgentOptions): SubAgent {
-    const agent = createSubAgent(options)
-    this.addAgent(agent)
     return agent
   }
 
@@ -90,20 +79,6 @@ export class Room {
     return removed
   }
 
-  hasAgent(agentName: string): boolean {
-    return this.agents.has(agentName)
-  }
-
-  getAgent(agentName: string): SubAgent {
-    const agent = this.agents.get(agentName)
-
-    if (agent == null) {
-      throw new Error(`Agent "${agentName}" not found`)
-    }
-
-    return agent
-  }
-
   listAgents(): SubAgent[] {
     return [...this.agents.values()]
   }
@@ -113,11 +88,7 @@ export class Room {
   }
 
   getEvents(): RoomEvent[] {
-    return [...this.publicEvents]
-  }
-
-  getInternalEvents(): RoomEvent[] {
-    return [...this.internalEvents]
+    return [...this.events]
   }
 
   subscribe(listener: RoomEventListener): () => void {
@@ -126,47 +97,6 @@ export class Room {
     return () => {
       this.listeners.delete(listener)
     }
-  }
-
-  async sendToAgent(options: RoomDirectMessageOptions): Promise<RoomReplyRecord> {
-    const from = this.getSenderName(options.fromAgentName)
-    const round = options.round ?? 1
-    const trigger = options.trigger ?? 'user'
-    const targetAgent = this.getAgent(options.toAgentName)
-
-    if (options.recordMessage !== false) {
-      this.recordMessage({
-        from,
-        to: targetAgent.name,
-        message: options.message,
-        round,
-        trigger,
-      })
-    }
-    else {
-      this.recordMessage({
-        from,
-        to: targetAgent.name,
-        message: options.message,
-        round,
-        trigger,
-      }, 'internal')
-    }
-
-    const reply = await targetAgent.sendText({
-      message: options.promptMessage ?? buildAgentPrompt(options.message, options.fromAgentName, round),
-      config: options.config,
-    })
-
-    return this.recordReply({
-      from,
-      to: targetAgent.name,
-      agentName: reply.agentName,
-      text: reply.text,
-      response: reply.response,
-      round,
-      trigger,
-    })
   }
 
   async enqueueConversation(options: RoomConversationOptions): Promise<void> {
@@ -212,14 +142,12 @@ export class Room {
               continue
             }
 
-            const reply = await this.sendToAgent({
-              fromAgentName: from,
-              toAgentName: agent.name,
+            const reply = await this.sendToAgent(agent, {
+              from,
               message: options.message,
               config: options.config,
               round,
               trigger: 'user',
-              recordMessage: false,
             })
 
             nextReplies.push(reply)
@@ -232,15 +160,13 @@ export class Room {
                 continue
               }
 
-              const reply = await this.sendToAgent({
-                fromAgentName: sourceReply.agentName,
-                toAgentName: agent.name,
+              const reply = await this.sendToAgent(agent, {
+                from: sourceReply.agentName,
                 message: sourceReply.text,
                 promptMessage: buildRelayPrompt(sourceReply.agentName, sourceReply.text, round),
                 config: options.config,
                 round,
                 trigger: 'agent',
-                recordMessage: false,
               })
 
               nextReplies.push(reply)
@@ -267,6 +193,33 @@ export class Room {
     }
   }
 
+  private async sendToAgent(
+    targetAgent: SubAgent,
+    options: {
+      from: string
+      message: string
+      promptMessage?: string
+      config?: RoomConversationOptions['config']
+      round: number
+      trigger: RoomMessageRecord['trigger']
+    },
+  ): Promise<RoomReplyRecord> {
+    const reply = await targetAgent.sendText({
+      message: options.promptMessage ?? buildAgentPrompt(options.message, options.from, options.round),
+      config: options.config,
+    })
+
+    return this.recordReply({
+      from: options.from,
+      to: targetAgent.name,
+      agentName: reply.agentName,
+      text: reply.text,
+      response: reply.response,
+      round: options.round,
+      trigger: options.trigger,
+    })
+  }
+
   private normalizeMaxRounds(maxRounds?: number): number {
     if (maxRounds == null || Number.isNaN(maxRounds)) {
       return 3
@@ -275,26 +228,19 @@ export class Room {
     return Math.min(Math.max(maxRounds, 1), 3)
   }
 
-  private assertAgentNameAvailable(agentName: string): void {
-    if (this.hasAgent(agentName)) {
-      throw new Error(`Agent "${agentName}" already exists`)
-    }
-  }
-
   private getSenderName(fromAgentName?: string): string {
     return hasText(fromAgentName) ? fromAgentName : 'user'
   }
 
   private recordMessage(
     event: Omit<RoomMessageRecord, 'id' | 'timestamp' | 'type'>,
-    visibility: 'public' | 'internal' = 'public',
   ): RoomMessageRecord {
     return this.saveEvent({
       ...event,
       id: createRoomEventId('room_message'),
       type: 'message',
       timestamp: createTimestamp(),
-    }, visibility)
+    })
   }
 
   private recordReply(
@@ -321,18 +267,9 @@ export class Room {
     })
   }
 
-  // 房间同时维护对外展示事件和内部完整事件。
-  private saveEvent<T extends RoomEvent>(
-    event: T,
-    visibility: 'public' | 'internal' = 'public',
-  ): T {
-    this.internalEvents.push(event)
-
-    if (visibility === 'public') {
-      this.publicEvents.push(event)
-      this.notifyListeners(event)
-    }
-
+  private saveEvent<T extends RoomEvent>(event: T): T {
+    this.events.push(event)
+    this.notifyListeners(event)
     return event
   }
 
@@ -343,11 +280,7 @@ export class Room {
   }
 }
 
-export function createRoom(options: RoomOptions = {}): Room {
-  return new Room(options)
-}
-
 // 当前服务只维护这一个全局房间实例。
-const room = createRoom()
+const room = new Room()
 
 export { room }
