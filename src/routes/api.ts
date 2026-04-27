@@ -68,6 +68,14 @@ apiRoutes.get('/events', c => c.json({
   events: room.getEvents(),
 }))
 
+apiRoutes.delete('/records', async (c) => {
+  await room.clearRecords()
+
+  return c.json({
+    success: true,
+  })
+})
+
 apiRoutes.get('/sse', (c) => {
   return streamSSE(c, async (stream) => {
     await stream.writeSSE(buildSseEvent('connected', {

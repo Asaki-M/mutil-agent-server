@@ -8,6 +8,7 @@ import type {
 } from '../model/room'
 import type { SubAgentOptions } from '../model/subAgent'
 import { EventEmitter } from 'node:events'
+import { clearRoomState, loadRoomState, saveRoomState } from './persistence'
 import { SubAgent } from './subAgent'
 
 const ROOM_EVENT = 'room_event'
@@ -61,6 +62,16 @@ export class Room {
   private readonly emitter = new EventEmitter()
   // 串行执行会话，避免多次 /messages 请求同时改写同一个 room 状态。
   private workflowQueue = Promise.resolve()
+  private persistenceQueue = Promise.resolve()
+  private readonly restoreTask: Promise<void>
+
+  constructor() {
+    this.restoreTask = this.restore()
+  }
+
+  async ready(): Promise<void> {
+    await this.restoreTask
+  }
 
   createAgent(options: SubAgentOptions): SubAgent {
     const agent = new SubAgent(options)
@@ -81,6 +92,27 @@ export class Room {
     }
 
     return removed
+  }
+
+  async clearRecords(): Promise<void> {
+    this.workflowQueue = this.workflowQueue
+      .catch(() => undefined)
+      .then(async () => {
+        await this.ready()
+        this.agents.clear()
+        this.events.length = 0
+        await this.enqueuePersistence(async () => clearRoomState())
+
+        this.emitter.emit(ROOM_EVENT, {
+          id: createRoomEventId('room_status'),
+          type: 'status',
+          event: 'records_cleared',
+          detail: 'All room records cleared',
+          timestamp: createTimestamp(),
+        } satisfies RoomStatusEvent)
+      })
+
+    await this.workflowQueue
   }
 
   listAgents(): SubAgent[] {
@@ -278,7 +310,42 @@ export class Room {
     this.events.push(event)
     // SSE 订阅者会在这里实时收到 status/message/reply。
     this.emitter.emit(ROOM_EVENT, event)
+    this.persist()
     return event
+  }
+
+  private async restore(): Promise<void> {
+    const state = await loadRoomState()
+
+    if (state == null) {
+      return
+    }
+
+    for (const agentState of state.agents) {
+      const agent = SubAgent.fromSnapshot(agentState)
+      this.agents.set(agent.name, agent)
+    }
+
+    this.events.push(...state.events)
+  }
+
+  private persist(): void {
+    void this.enqueuePersistence(async () => saveRoomState({
+      version: 1,
+      updatedAt: createTimestamp(),
+      agents: this.listAgents().map(agent => agent.toSnapshot()),
+      events: this.getEvents(),
+    })).catch((error: unknown) => {
+      console.error('Failed to persist room state', error)
+    })
+  }
+
+  private async enqueuePersistence(task: () => Promise<void>): Promise<void> {
+    this.persistenceQueue = this.persistenceQueue
+      .catch(() => undefined)
+      .then(task)
+
+    await this.persistenceQueue
   }
 }
 

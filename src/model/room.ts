@@ -32,7 +32,7 @@ export interface RoomReplyRecord extends SubAgentTextReply {
 export interface RoomStatusEvent {
   id: string
   type: 'status'
-  event: 'agent_added' | 'agent_removed' | 'conversation_started' | 'conversation_completed' | 'conversation_failed'
+  event: 'agent_added' | 'agent_removed' | 'conversation_started' | 'conversation_completed' | 'conversation_failed' | 'records_cleared'
   detail: string
   timestamp: string
 }

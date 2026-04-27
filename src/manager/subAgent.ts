@@ -2,6 +2,7 @@ import type { Content } from '@google/genai'
 import type {
   ChatMessageOptions,
 } from '../model/aiClient'
+import type { PersistedSubAgent } from '../model/persistence'
 import type {
   SubAgentOptions,
   SubAgentTextReply,
@@ -35,10 +36,33 @@ export class SubAgent {
   private summary = ''
   private readonly recentMessages: MemoryMessage[] = []
 
-  constructor(options: SubAgentOptions) {
+  constructor(options: SubAgentOptions, memory?: Pick<PersistedSubAgent, 'summary' | 'recentMessages'>) {
     this.name = options.name
     this.sysPrompt = options.sysPrompt
     this.model = options.model
+    this.summary = memory?.summary ?? ''
+    this.recentMessages.push(...(memory?.recentMessages ?? []))
+  }
+
+  static fromSnapshot(snapshot: PersistedSubAgent): SubAgent {
+    return new SubAgent({
+      name: snapshot.name,
+      sysPrompt: snapshot.sysPrompt,
+      model: snapshot.model,
+    }, {
+      summary: snapshot.summary,
+      recentMessages: snapshot.recentMessages,
+    })
+  }
+
+  toSnapshot(): PersistedSubAgent {
+    return {
+      name: this.name,
+      sysPrompt: this.sysPrompt,
+      model: this.model,
+      summary: this.summary,
+      recentMessages: [...this.recentMessages],
+    }
   }
 
   async sendText(options: ChatMessageOptions): Promise<SubAgentTextReply> {
