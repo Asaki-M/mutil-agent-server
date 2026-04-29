@@ -1,0 +1,31 @@
+src/index.ts
+  a412bf90db806e2b 6,16
+src/service/api.service.ts
+  a412bf90db806e2b 2,62-150,194,196-203
+src/routes/api.ts
+  a412bf90db806e2b 5,7-14,19,23,27,29,34,37,40,45,47,51
+README.md
+  a412bf90db806e2b 1-334
+src/routes/workflow.ts
+  a412bf90db806e2b 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "cb0b10447d037254e5060e026707f44bd3082d4c",
+  "prompts": {
+    "a412bf90db806e2b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dd2fb-58e1-7030-8421-2ae0317ce063",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Qinghuan",
+      "messages": [],
+      "total_additions": 800,
+      "total_deletions": 64,
+      "accepted_lines": 799,
+      "overriden_lines": 0
+    }
+  }
+}
