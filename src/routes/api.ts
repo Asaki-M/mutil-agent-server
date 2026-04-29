@@ -1,94 +1,54 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
-import { room } from '../manager/room'
 import {
   buildRoomEventSse,
+  buildSseConnectedEvent,
   buildSseEvent,
-  normalizeAgentInput,
-  normalizeMessageInput,
+  clearRecords,
+  createAgent,
+  enqueueMessage,
+  getRoomEvents,
+  listAgents,
+  listEvents,
+  removeAgent,
+  subscribeRoomEvents,
 } from '../service/api.service'
 
 const apiRoutes = new Hono()
 
-apiRoutes.get('/agents', c => c.json({
-  agents: room.listAgents().map(agent => ({
-    name: agent.name,
-    sysPrompt: agent.sysPrompt,
-    model: agent.model,
-  })),
-}))
+apiRoutes.get('/agents', c => c.json(listAgents()))
 
 apiRoutes.post('/agents', async (c) => {
   const body: unknown = await c.req.json()
-  const input = normalizeAgentInput(body)
-  const agent = room.createAgent(input)
-
-  return c.json({
-    success: true,
-    agent: {
-      name: agent.name,
-      sysPrompt: agent.sysPrompt,
-      model: agent.model,
-    },
-  })
+  return c.json(createAgent(body))
 })
 
 apiRoutes.delete('/agents/:name', (c) => {
-  const name = c.req.param('name')
-  const removed = room.removeAgent(name)
+  const result = removeAgent(c.req.param('name'))
 
-  if (!removed) {
-    return c.json({
-      success: false,
-      message: `Agent "${name}" not found`,
-    }, 404)
-  }
-
-  return c.json({
-    success: true,
-    name,
-  })
+  return c.json(result.body, result.status)
 })
 
 apiRoutes.post('/messages', async (c) => {
   const body: unknown = await c.req.json()
-  const input = normalizeMessageInput(body)
-
-  void room.enqueueConversation(input)
-
-  return c.json({
-    success: true,
-    message: 'Conversation queued',
-    agentCount: room.listAgentNames().length,
-    maxRounds: input.maxRounds ?? 3,
-  })
+  return c.json(enqueueMessage(body))
 })
 
-apiRoutes.get('/events', c => c.json({
-  events: room.getEvents(),
-}))
+apiRoutes.get('/events', c => c.json(listEvents()))
 
 apiRoutes.delete('/records', async (c) => {
-  await room.clearRecords()
-
-  return c.json({
-    success: true,
-  })
+  return c.json(await clearRecords())
 })
 
 apiRoutes.get('/sse', (c) => {
   return streamSSE(c, async (stream) => {
-    await stream.writeSSE(buildSseEvent('connected', {
-      message: 'SSE connection established',
-      agents: room.listAgentNames(),
-      eventCount: room.getEvents().length,
-    }))
+    await stream.writeSSE(buildSseConnectedEvent())
 
-    for (const event of room.getEvents()) {
+    for (const event of getRoomEvents()) {
       await stream.writeSSE(buildRoomEventSse(event))
     }
 
-    const unsubscribe = room.subscribe(async (event) => {
+    const unsubscribe = subscribeRoomEvents(async (event) => {
       await stream.writeSSE(buildRoomEventSse(event))
     })
 

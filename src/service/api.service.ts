@@ -1,4 +1,5 @@
 import type { RoomEvent } from '../model/room'
+import { room } from '../manager/room'
 
 interface SseEventPayload {
   data: string
@@ -58,6 +59,95 @@ function buildRoomEventSse(event: RoomEvent): SseEventPayload {
   return buildSseEvent(getRoomEventName(event), event, event.id)
 }
 
+function toAgentResponse(agent: { name: string, sysPrompt: string, model?: string }): CreateAgentInput {
+  return {
+    name: agent.name,
+    sysPrompt: agent.sysPrompt,
+    model: agent.model,
+  }
+}
+
+function listAgents() {
+  return {
+    agents: room.listAgents().map(toAgentResponse),
+  }
+}
+
+function createAgent(body: unknown) {
+  const input = normalizeAgentInput(body)
+  const agent = room.createAgent(input)
+
+  return {
+    success: true,
+    agent: toAgentResponse(agent),
+  }
+}
+
+function removeAgent(name: string) {
+  const removed = room.removeAgent(name)
+
+  if (!removed) {
+    return {
+      body: {
+        success: false,
+        message: `Agent "${name}" not found`,
+      },
+      status: 404 as const,
+    }
+  }
+
+  return {
+    body: {
+      success: true,
+      name,
+    },
+    status: 200 as const,
+  }
+}
+
+function enqueueMessage(body: unknown) {
+  const input = normalizeMessageInput(body)
+
+  void room.enqueueConversation(input)
+
+  return {
+    success: true,
+    message: 'Conversation queued',
+    agentCount: room.listAgentNames().length,
+    maxRounds: input.maxRounds ?? 3,
+  }
+}
+
+function listEvents() {
+  return {
+    events: room.getEvents(),
+  }
+}
+
+async function clearRecords() {
+  await room.clearRecords()
+
+  return {
+    success: true,
+  }
+}
+
+function buildSseConnectedEvent(): SseEventPayload {
+  return buildSseEvent('connected', {
+    message: 'SSE connection established',
+    agents: room.listAgentNames(),
+    eventCount: room.getEvents().length,
+  })
+}
+
+function getRoomEvents(): RoomEvent[] {
+  return room.getEvents()
+}
+
+function subscribeRoomEvents(listener: (event: RoomEvent) => void | Promise<void>): () => void {
+  return room.subscribe(listener)
+}
+
 function normalizeAgentInput(input: unknown): CreateAgentInput {
   if (!isRecord(input)) {
     throw new Error('Invalid agent payload')
@@ -101,7 +191,14 @@ function normalizeMessageInput(input: unknown): SendMessageInput {
 
 export {
   buildRoomEventSse,
+  buildSseConnectedEvent,
   buildSseEvent,
-  normalizeAgentInput,
-  normalizeMessageInput,
+  clearRecords,
+  createAgent,
+  enqueueMessage,
+  getRoomEvents,
+  listAgents,
+  listEvents,
+  removeAgent,
+  subscribeRoomEvents,
 }
