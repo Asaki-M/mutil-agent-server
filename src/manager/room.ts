@@ -43,16 +43,17 @@ function buildAgentPrompt(
 }
 
 function buildRelayPrompt(
-  sourceAgentName: string,
-  message: string,
+  replies: RoomReplyRecord[],
   round: number,
 ): string {
   return [
     '你正在当前协作会话中与其他 agent 配合。',
     `当前是第 ${round} 轮交流。`,
-    `以下是 agent "${sourceAgentName}" 刚刚的真实回复，请你继续自然回应。`,
-    '要求：保持你自己的角色设定，不要复读，不要暴露系统编排信息，语气像真实对话。',
-    message,
+    '以下是其他 agent 上一轮的真实回复，请你综合这些上下文后继续自然回应。',
+    '你可以明确回应某个 agent 的观点，例如“我不同意 Mika 的说法”或“我赞同 Luna”。',
+    '如果你确实不同意，可以自然反驳或争论；如果你赞同，也可以补充理由。',
+    '要求：保持你自己的角色设定，不要复读，不要暴露系统编排信息，语气像真实群聊。',
+    ...replies.map(reply => `agent "${reply.agentName}"：\n${reply.text}`),
   ].join('\n\n')
 }
 
@@ -189,25 +190,25 @@ export class Room {
           nextReplies.push(...replies)
         }
         else {
-          // 后续轮次：上一轮每个 agent 的回复，会串行转发给其他所有 agent 继续接话。
-          for (const sourceReply of roundReplies) {
-            for (const agent of agents) {
-              // 不把 agent 自己刚说过的话再发回给它自己。
-              if (agent.name === sourceReply.agentName) {
-                continue
-              }
+          // 后续轮次：每个 agent 只收到一次上一轮其他 agent 的汇总，避免三人以上交叉转发爆炸。
+          for (const agent of agents) {
+            const otherReplies = roundReplies.filter(reply => reply.agentName !== agent.name)
 
-              const reply = await this.sendToAgent(agent, {
-                from: sourceReply.agentName,
-                message: sourceReply.text,
-                promptMessage: buildRelayPrompt(sourceReply.agentName, sourceReply.text, round),
-                config: options.config,
-                round,
-                trigger: 'agent',
-              })
-
-              nextReplies.push(reply)
+            if (otherReplies.length === 0) {
+              continue
             }
+
+            const reply = await this.sendToAgent(agent, {
+              from: 'agents',
+              contextFrom: otherReplies.map(reply => reply.agentName),
+              message: otherReplies.map(reply => reply.text).join('\n\n'),
+              promptMessage: buildRelayPrompt(otherReplies, round),
+              config: options.config,
+              round,
+              trigger: 'agent',
+            })
+
+            nextReplies.push(reply)
           }
         }
 
@@ -234,6 +235,7 @@ export class Room {
     targetAgent: SubAgent,
     options: {
       from: string
+      contextFrom?: string[]
       message: string
       promptMessage?: string
       config?: RoomConversationOptions['config']
@@ -251,6 +253,7 @@ export class Room {
     return this.recordReply({
       from: options.from,
       to: targetAgent.name,
+      contextFrom: options.contextFrom,
       agentName: reply.agentName,
       text: reply.text,
       response: reply.response,

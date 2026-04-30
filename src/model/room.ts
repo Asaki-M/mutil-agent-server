@@ -24,6 +24,7 @@ export interface RoomReplyRecord extends SubAgentTextReply {
   type: 'reply'
   from: string
   to: string
+  contextFrom?: string[]
   round: number
   trigger: 'user' | 'agent' | 'system'
   timestamp: string
