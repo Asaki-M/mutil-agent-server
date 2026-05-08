@@ -9,7 +9,7 @@ import type {
 } from '../model/workflow'
 import { Buffer } from 'node:buffer'
 import { spawn } from 'node:child_process'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute, resolve, sep } from 'node:path'
 import { generateText } from './aiClient'
 import { SubAgent } from './subAgent'
 
@@ -24,8 +24,24 @@ interface PlannedToolCall {
 
 const DEFAULT_MAX_STEPS = 20
 const DEFAULT_MAX_TOOL_CALLS = 5
+const TOOL_TIMEOUT_MS = 30_000
+const MAX_TOOL_OUTPUT_LENGTH = 120_000
+const MAX_NODE_OUTPUT_LENGTH = 80_000
+const SCRIPT_ROOT = resolve(process.cwd(), 'example', 'scripts')
 const BRANCH_SYSTEM_PROMPT = '你负责根据上游 agent 的执行结果选择 workflow 的下一条边。只返回最匹配的 edge id；如果没有任何边适合，返回 NONE。不要返回解释。'
 const TOOL_PLAN_PROMPT = '你负责为当前 agent 节点规划需要调用的工具。根据任务输入和可用工具，返回 JSON 数组。数组项格式为 {"toolName":"工具名","input":{}}。如果不需要工具，返回 []。不要返回 markdown 或解释。'
+
+function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text
+  }
+
+  return `${text.slice(0, maxLength)}\n\n[truncated ${text.length - maxLength} chars]`
+}
+
+function stringifyLimited(value: unknown, maxLength = MAX_TOOL_OUTPUT_LENGTH): string {
+  return truncateText(JSON.stringify(value), maxLength)
+}
 
 function buildToolContext(toolResults: WorkflowToolResult[]): string {
   if (toolResults.length === 0) {
@@ -37,8 +53,8 @@ function buildToolContext(toolResults: WorkflowToolResult[]): string {
     ...toolResults.map(result => [
       `工具：${result.toolName}`,
       `状态：${result.success ? '成功' : '失败'}`,
-      `输入：${JSON.stringify(result.input)}`,
-      `结果：${JSON.stringify(result.output)}`,
+      `输入：${stringifyLimited(result.input)}`,
+      `结果：${stringifyLimited(result.output)}`,
     ].join('\n')),
   ].join('\n\n')
 }
@@ -59,7 +75,7 @@ function buildNodeInput(
   return [
     node.input ?? '请基于上一个节点的结果继续处理。',
     `用户输入：\n${options.input}`,
-    `上一个节点 ${previousResult.nodeName} 的结果：\n${previousResult.output}`,
+    `上一个节点 ${previousResult.nodeName} 的结果：\n${truncateText(previousResult.output, MAX_NODE_OUTPUT_LENGTH)}`,
   ].filter(text => text !== '').join('\n\n')
 }
 
@@ -77,7 +93,7 @@ function buildToolPlanPrompt(input: string, tools: ExternalToolDSL[], maxToolCal
 }
 
 function parsePlannedToolCalls(text: string, maxToolCalls: number): PlannedToolCall[] {
-  const jsonText = text.trim().replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/```$/, '').trim()
+  const jsonText = extractJsonText(text, '[', ']')
 
   try {
     const value: unknown = JSON.parse(jsonText)
@@ -100,6 +116,27 @@ function parsePlannedToolCalls(text: string, maxToolCalls: number): PlannedToolC
   }
 }
 
+function parseJsonValue(text: string): unknown {
+  return JSON.parse(extractJsonText(text, '{', '}')) as unknown
+}
+
+function extractJsonText(text: string, startChar: '[' | '{', endChar: ']' | '}'): string {
+  const trimmed = text.trim()
+  const fenceStart = trimmed.indexOf('```')
+  const fenceEnd = fenceStart === -1 ? -1 : trimmed.indexOf('```', fenceStart + 3)
+  const candidate = fenceStart === -1 || fenceEnd === -1
+    ? trimmed
+    : trimmed.slice(fenceStart + 3, fenceEnd).replace(/^json\s*/, '').trim()
+  const start = candidate.indexOf(startChar)
+  const end = candidate.lastIndexOf(endChar)
+
+  if (start === -1 || end === -1 || end <= start) {
+    return candidate
+  }
+
+  return candidate.slice(start, end + 1)
+}
+
 function buildToolUrl(url: string): string {
   if (/^https?:\/\//.test(url)) {
     return url
@@ -109,7 +146,13 @@ function buildToolUrl(url: string): string {
 }
 
 function buildToolScriptPath(endpoint: string): string {
-  return isAbsolute(endpoint) ? endpoint : resolve(process.cwd(), endpoint)
+  const script = isAbsolute(endpoint) ? endpoint : resolve(process.cwd(), endpoint)
+
+  if (!script.startsWith(`${SCRIPT_ROOT}${sep}`) || !script.endsWith('.js')) {
+    throw new Error('Node tool endpoint must be a js file under example/scripts')
+  }
+
+  return script
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -184,15 +227,16 @@ async function executeNodeTool(tool: ExternalToolDSL, input?: unknown): Promise<
   const stdout = await runNodeScript(buildToolScriptPath(tool.action.endpoint), buildToolPayload(tool.action.params, input))
 
   try {
-    return JSON.parse(stdout) as unknown
+    return parseJsonValue(stdout)
   }
   catch {
-    return stdout
+    return truncateText(stdout, MAX_TOOL_OUTPUT_LENGTH)
   }
 }
 
 async function runNodeScript(script: string, input: unknown): Promise<string> {
   return new Promise((resolvePromise, reject) => {
+    let settled = false
     const child = spawn('node', [script], {
       cwd: process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -200,16 +244,47 @@ async function runNodeScript(script: string, input: unknown): Promise<string> {
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
 
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      child.kill('SIGKILL')
+      reject(new Error(`Script timed out after ${TOOL_TIMEOUT_MS}ms`))
+    }, TOOL_TIMEOUT_MS)
+    const cleanup = () => {
+      clearTimeout(timeout)
+      child.stdout.destroy()
+      child.stderr.destroy()
+      child.stdin.destroy()
+    }
+
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
     child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
-    child.on('error', reject)
+    child.on('error', (error) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      cleanup()
+      reject(error)
+    })
     child.on('close', (code) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      cleanup()
+
       if (code !== 0) {
         reject(new Error(Buffer.concat(stderr).toString('utf8') || `Script exited with code ${code}`))
         return
       }
 
-      resolvePromise(Buffer.concat(stdout).toString('utf8'))
+      resolvePromise(truncateText(Buffer.concat(stdout).toString('utf8'), MAX_TOOL_OUTPUT_LENGTH))
     })
 
     child.stdin.end(JSON.stringify(input ?? {}))
@@ -221,16 +296,33 @@ async function executeHttpTool(tool: ExternalToolDSL, input?: unknown): Promise<
     return undefined
   }
 
-  const response = await fetch(buildToolUrl(tool.action.url), {
-    method: tool.action.method,
-    headers: tool.action.headers,
-    body: tool.action.method === 'POST' ? JSON.stringify(buildToolPayload(tool.action.body, input)) : undefined,
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS)
+
+  let response: Response
+  try {
+    response = await fetch(buildToolUrl(tool.action.url), {
+      method: tool.action.method,
+      headers: tool.action.headers,
+      body: tool.action.method === 'POST' ? JSON.stringify(buildToolPayload(tool.action.body, input)) : undefined,
+      signal: controller.signal,
+    })
+  }
+  catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Tool "${tool.name}" timed out after ${TOOL_TIMEOUT_MS}ms`)
+    }
+
+    throw error
+  }
+  finally {
+    clearTimeout(timeout)
+  }
 
   const output = await readToolResponse(response)
 
   if (!response.ok) {
-    throw new Error(`Tool "${tool.name}" failed with status ${response.status}: ${JSON.stringify(output)}`)
+    throw new Error(`Tool "${tool.name}" failed with status ${response.status}: ${stringifyLimited(output)}`)
   }
 
   return output
@@ -239,7 +331,7 @@ async function executeHttpTool(tool: ExternalToolDSL, input?: unknown): Promise<
 function buildBranchPrompt(currentResult: WorkflowNodeResult, edges: WorkflowEdge[]): string {
   return [
     `上游节点 ${currentResult.nodeName} 的执行结果：`,
-    currentResult.output,
+    truncateText(currentResult.output, MAX_NODE_OUTPUT_LENGTH),
     '候选边：',
     ...edges.map(edge => [
       `edge id: ${edge.id}`,
@@ -273,7 +365,7 @@ export class WorkflowMgr {
       }
       results.push(result)
 
-      currentNodeId = await this.selectNextNodeId(dsl.edges.filter(edge => edge.from === node.id), result)
+      currentNodeId = await this.selectNextNodeId(dsl.edges.filter(edge => edge.from === node.id), result, nodes)
     }
 
     if (currentNodeId != null) {
@@ -284,13 +376,17 @@ export class WorkflowMgr {
     return this.buildRunResult(dsl, results, reason === 'completed', reason)
   }
 
-  private async selectNextNodeId(edges: WorkflowEdge[], result: WorkflowNodeResult): Promise<string | undefined> {
+  private async selectNextNodeId(
+    edges: WorkflowEdge[],
+    result: WorkflowNodeResult,
+    nodes: Map<string, WorkflowAgentNode>,
+  ): Promise<string | undefined> {
     if (edges.length === 0) {
       return undefined
     }
 
     if (edges.length === 1 && edges[0].condition == null) {
-      return edges[0].to
+      return this.normalizeNextNodeId(edges[0].to, nodes)
     }
 
     const selectedEdgeId = (await generateText({
@@ -305,7 +401,21 @@ export class WorkflowMgr {
       return undefined
     }
 
-    return edges.find(edge => edge.id === selectedEdgeId)?.to
+    const nextNodeId = edges.find(edge => edge.id === selectedEdgeId)?.to
+
+    return this.normalizeNextNodeId(nextNodeId, nodes)
+  }
+
+  private normalizeNextNodeId(nextNodeId: string | undefined, nodes: Map<string, WorkflowAgentNode>): string | undefined {
+    if (nextNodeId == null) {
+      return undefined
+    }
+
+    if (!nodes.has(nextNodeId)) {
+      throw new Error(`Workflow next node "${nextNodeId}" not found`)
+    }
+
+    return nextNodeId
   }
 
   private async runNode(node: WorkflowAgentNode, input: string): Promise<{ output: string, tools: WorkflowToolResult[] }> {
