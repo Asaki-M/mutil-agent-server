@@ -1,0 +1,40 @@
+src/routes/workflow.ts
+  s_357df06bdeedb3::t_ab6e7364aaeb41 6-18
+  s_357df06bdeedb3::t_b893cc19a157b0 2
+src/model/workflow.ts
+  s_357df06bdeedb3::t_5b1eaa0832926c 60,62-68
+  s_357df06bdeedb3::t_c9f69a5e017efa 21-26,31-32,38-41,46,50-53
+  s_357df06bdeedb3::t_67b7cbba984065 4-12,47-49
+  s_357df06bdeedb3::t_5cf4fb26426fee 27
+  s_357df06bdeedb3::t_ffb87c88f23984 33-37,42
+  s_357df06bdeedb3::t_7cbef3c741f3f9 55-59,61,69-77
+src/manager/workflow.ts
+  s_357df06bdeedb3::t_b893cc19a157b0 10-12,111-114,184,186-190,192,194-216
+  s_357df06bdeedb3::t_5b1eaa0832926c 2,8,30-39,41-50,76,101-110,141-155,157-158,161-164,166-172,174-178,180-183,185,191,193,217-218,220-226,228-236
+  s_357df06bdeedb3::t_4403dfb42fbad3 115-140,227
+  s_357df06bdeedb3::t_3343cff844797d 80
+  s_357df06bdeedb3::t_7cbef3c741f3f9 1,3-7,9,13-19,25,27,29,51,53-62,237-262,266-270,273-308,361-375
+  s_357df06bdeedb3::t_9abc0ee1c59a5b 21-24,26,40,52,63-65,67,70-75,77-78,81-84,87-98,100,156,159-160,165,173,179,219,264-265,271-272,309-328,336-337,339,342-345,347-350,352-360
+  s_357df06bdeedb3::t_e84f5a752502a7 329-335,338,340-341,346,351
+src/service/workflow.service.ts
+  s_357df06bdeedb3::t_3343cff844797d 129,262-273
+  s_357df06bdeedb3::t_249a52646eebca 260
+  s_357df06bdeedb3::t_3348b7a6e88d5c 139,206
+  s_357df06bdeedb3::t_ab6e7364aaeb41 1-128,130-138,140-205,207-259,261,274-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "212221a673153b4dc8d58d0228b32e34d10d5ea9",
+  "prompts": {},
+  "sessions": {
+    "s_357df06bdeedb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e01c2-338f-7b11-9c1a-a491e87fb169",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Qinghuan <1041220793@qq.com>"
+    }
+  }
+}
