@@ -1,0 +1,21 @@
+src/manager/workflow.ts
+  s_357df06bdeedb3::t_96b4e402ce9390 125-129
+  s_357df06bdeedb3::t_48fb9604c30019 368,379-383,389,404-418
+  s_357df06bdeedb3::t_f0ae144f4e6875 12,27-30,34-45,56-57,78,96,119-124,130-139,149-155,230,233,239,247-262,265-273,275-281,287,299-320,325,334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "0e2c12007b7c39b2bc4c96e395ee43fcffa47144",
+  "prompts": {},
+  "sessions": {
+    "s_357df06bdeedb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e01c2-338f-7b11-9c1a-a491e87fb169",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Qinghuan <1041220793@qq.com>"
+    }
+  }
+}
