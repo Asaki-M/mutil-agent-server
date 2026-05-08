@@ -1,0 +1,122 @@
+{
+  "input": "请审查用户输入中指定的 commits，支持 commits 数组或逗号分隔的 commit 字符串；如果需要生成报告，可以在输入中指定 reportFile，例如 {\"commits\":[\"commit_sha_1\",\"commit_sha_2\"],\"reportFile\":\"example/reports/code-review-report.md\"}。如果发现代码审查问题，生成 Markdown 报告；如果没有问题，执行本地 mock 推送。",
+  "dsl": {
+    "version": 1,
+    "id": "code_review_workflow",
+    "name": "代码审查 Workflow",
+    "description": "获取指定 commit 内容，分析变更目的，审查代码问题，并按结果推送或生成报告。",
+    "entryNodeId": "get_commit_content",
+    "maxSteps": 8,
+    "nodes": [
+      {
+        "id": "get_commit_content",
+        "type": "agent",
+        "name": "Commit 内容获取 Agent",
+        "sysPrompt": "你负责获取用户指定的一个或多个 commit 内容。必须从用户输入中提取 commits 数组；如果用户用逗号分隔字符串，也要拆成数组。然后规划并调用 getCommitContent 工具，input 必须是 {\"commits\":[\"...\"]}。工具返回后，简洁输出每个 commit 的 hash、提交信息、变更文件和 diff 内容，不要做审查判断。",
+        "input": "请从用户输入中识别要审查的 commits，支持 commits 数组、commit 字段或逗号分隔字符串。不要固定使用 HEAD，除非用户明确指定 HEAD。",
+        "maxToolCalls": 1,
+        "tools": [
+          {
+            "name": "getCommitContent",
+            "description": "获取一个或多个 git commit 的元信息、变更文件列表和 diff。input 必须来自用户输入，示例：{\"commits\":[\"abc123\",\"def456\"]}",
+            "action": {
+              "type": "node",
+              "endpoint": "/Users/hujieming/Desktop/code/personal/multi-agent-server/example/scripts/get-commit-content.js",
+              "params": {}
+            }
+          }
+        ]
+      },
+      {
+        "id": "summarize_commit_purpose",
+        "type": "agent",
+        "name": "Commit 意图分析 Agent",
+        "sysPrompt": "你负责根据 commit diff 分析这些提交做了什么。输出应包含：变更概述、涉及模块、主要行为变化、潜在影响范围。不要做代码审查结论。",
+        "input": "请基于上一个节点拿到的 commit 内容，分析这些 commit 的目的和实现内容。",
+        "tools": []
+      },
+      {
+        "id": "review_code_issues",
+        "type": "agent",
+        "name": "代码审查 Agent",
+        "sysPrompt": "你负责代码审查。重点检查 bug、类型问题、异常处理、边界条件、安全风险、性能问题、可维护性问题。输出必须明确包含 reviewStatus 字段：PASS 表示没有必须修改的问题，FAIL 表示存在需要修改的问题。若 FAIL，列出问题、严重级别、文件/位置线索、原因和建议。",
+        "input": "请基于 commit 内容和变更意图进行代码审查，并给出 PASS 或 FAIL。",
+        "tools": []
+      },
+      {
+        "id": "push_review_passed",
+        "type": "agent",
+        "name": "审查通过推送 Agent",
+        "sysPrompt": "你负责在代码审查通过时执行本地 mock 推送。必须调用 pushReviewResult 工具，并在最终输出中说明这是 mock 推送结果，不是真实外部推送。",
+        "input": "审查没有发现必须修改的问题，请执行本地 mock 推送审查通过结果。",
+        "maxToolCalls": 1,
+        "tools": [
+          {
+            "name": "pushReviewResult",
+            "description": "本地 mock 推送工具，只把审查通过结果写入本地日志，不会请求真实外部系统。input 示例：{\"status\":\"PASS\",\"summary\":\"...\"}",
+            "action": {
+              "type": "node",
+              "endpoint": "/Users/hujieming/Desktop/code/personal/multi-agent-server/example/scripts/push-review-result.js",
+              "params": {
+                "status": "PASS",
+                "summary": "代码审查通过",
+                "destination": "mock-code-review-system"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "generate_review_report",
+        "type": "agent",
+        "name": "审查报告生成 Agent",
+        "sysPrompt": "你负责在代码审查发现问题时生成 Markdown 报告。必须先整理 markdown 内容，再调用 writeReviewReport 工具写入文件。最终输出报告文件路径。",
+        "input": "审查发现问题，请根据审查结果生成 Markdown 报告文件。如果用户输入指定了 reportFile，请把它作为 writeReviewReport 的 file；否则使用默认 example/code-review-report.md。",
+        "maxToolCalls": 1,
+        "tools": [
+          {
+            "name": "writeReviewReport",
+            "description": "写入代码审查 Markdown 报告。input 示例：{\"file\":\"example/reports/code-review-report.md\",\"markdown\":\"# Code Review Report\\n...\"}。file 可以来自用户输入的 reportFile。",
+            "action": {
+              "type": "node",
+              "endpoint": "/Users/hujieming/Desktop/code/personal/multi-agent-server/example/scripts/write-review-report.js",
+              "params": {
+                "file": "example/code-review-report.md"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge_commit_to_summary",
+        "from": "get_commit_content",
+        "to": "summarize_commit_purpose"
+      },
+      {
+        "id": "edge_summary_to_review",
+        "from": "summarize_commit_purpose",
+        "to": "review_code_issues"
+      },
+      {
+        "id": "edge_review_pass_to_push",
+        "from": "review_code_issues",
+        "to": "push_review_passed",
+        "condition": {
+          "source": "fromNodeResult",
+          "prompt": "如果审查结果 reviewStatus 是 PASS，或者没有发现必须修改的问题，则选择这条边。"
+        }
+      },
+      {
+        "id": "edge_review_fail_to_report",
+        "from": "review_code_issues",
+        "to": "generate_review_report",
+        "condition": {
+          "source": "fromNodeResult",
+          "prompt": "如果审查结果 reviewStatus 是 FAIL，或者发现需要修改的代码审查问题，则选择这条边。"
+        }
+      }
+    ]
+  }
+}
