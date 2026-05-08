@@ -1,5 +1,5 @@
 {
-  "input": "请审查用户输入中指定的 commits，支持 commits 数组或逗号分隔的 commit 字符串；如果需要生成报告，可以在输入中指定 reportFile，例如 {\"commits\":[\"commit_sha_1\",\"commit_sha_2\"],\"reportFile\":\"example/reports/code-review-report.md\"}。如果发现代码审查问题，生成 Markdown 报告；如果没有问题，执行本地 mock 推送。",
+  "input": "请审查用户输入中指定的 repoPath 和 commits，repoPath 是要审查的 git 项目绝对路径，commits 支持数组或逗号分隔字符串；如果需要生成报告，可以指定 reportFile，例如 {\"repoPath\":\"/path/to/project\",\"commits\":[\"commit_sha_1\",\"commit_sha_2\"],\"reportFile\":\"example/reports/code-review-report.md\"}。如果发现代码审查问题，生成 Markdown 报告；如果没有问题，执行本地 mock 推送。",
   "dsl": {
     "version": 1,
     "id": "code_review_workflow",
@@ -12,13 +12,13 @@
         "id": "get_commit_content",
         "type": "agent",
         "name": "Commit 内容获取 Agent",
-        "sysPrompt": "你负责获取用户指定的一个或多个 commit 内容。必须从用户输入中提取 commits 数组；如果用户用逗号分隔字符串，也要拆成数组。然后规划并调用 getCommitContent 工具，input 必须是 {\"commits\":[\"...\"]}。工具返回后，简洁输出每个 commit 的 hash、提交信息、变更文件和 diff 内容，不要做审查判断。",
-        "input": "请从用户输入中识别要审查的 commits，支持 commits 数组、commit 字段或逗号分隔字符串。不要固定使用 HEAD，除非用户明确指定 HEAD。",
+        "sysPrompt": "你负责获取用户指定项目中的一个或多个 commit 内容。必须从用户输入中提取 repoPath 和 commits 数组；repoPath 是 git 仓库目录，如果用户没有提供 repoPath 才使用当前服务项目目录；如果用户用逗号分隔 commits，也要拆成数组。然后规划并调用 getCommitContent 工具，input 必须是 {\"repoPath\":\"/path/to/project\",\"commits\":[\"...\"]}。工具返回后，简洁输出 repoPath、每个 commit 的 hash、提交信息、变更文件和 diff 内容，不要做审查判断。",
+        "input": "请从用户输入中识别要审查的 repoPath 和 commits，支持 commits 数组、commit 字段或逗号分隔字符串。不要固定使用 HEAD，除非用户明确指定 HEAD。",
         "maxToolCalls": 1,
         "tools": [
           {
             "name": "getCommitContent",
-            "description": "获取一个或多个 git commit 的元信息、变更文件列表和 diff。input 必须来自用户输入，示例：{\"commits\":[\"abc123\",\"def456\"]}",
+            "description": "获取指定 git 仓库中一个或多个 commit 的元信息、变更文件列表和 diff。input 必须来自用户输入，示例：{\"repoPath\":\"/path/to/project\",\"commits\":[\"abc123\",\"def456\"]}",
             "action": {
               "type": "node",
               "endpoint": "/Users/hujieming/Desktop/code/personal/multi-agent-server/example/scripts/get-commit-content.js",

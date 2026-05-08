@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const { execFileSync } = require('node:child_process')
+const { resolve } = require('node:path')
 
 function readInput() {
   return new Promise((resolve, reject) => {
@@ -17,12 +18,28 @@ function readInput() {
   })
 }
 
-function git(args) {
+function git(repoPath, args) {
   return execFileSync('git', args, {
-    cwd: process.cwd(),
+    cwd: repoPath,
     encoding: 'utf8',
     maxBuffer: 20 * 1024 * 1024,
   })
+}
+
+function normalizeRepoPath(value) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return process.cwd()
+  }
+
+  return resolve(value)
+}
+
+function assertGitRepo(repoPath) {
+  const result = git(repoPath, ['rev-parse', '--is-inside-work-tree']).trim()
+
+  if (result !== 'true') {
+    throw new Error(`${repoPath} is not a git work tree`)
+  }
 }
 
 function normalizeCommits(value) {
@@ -39,23 +56,26 @@ function normalizeCommits(value) {
 
 async function main() {
   const input = await readInput()
+  const repoPath = normalizeRepoPath(input.repoPath)
+  assertGitRepo(repoPath)
   const commits = normalizeCommits(input.commits ?? input.commit)
   const result = commits.map((commit) => {
-    const metadata = git(['show', '--no-patch', '--format=%H%n%an%n%ae%n%ad%n%s', commit]).trim().split('\n')
+    const metadata = git(repoPath, ['show', '--no-patch', '--format=%H%n%an%n%ae%n%ad%n%s', commit]).trim().split('\n')
 
     return {
+      repoPath,
       commit,
       hash: metadata[0],
       authorName: metadata[1],
       authorEmail: metadata[2],
       date: metadata[3],
       subject: metadata.slice(4).join('\n'),
-      files: git(['diff-tree', '--no-commit-id', '--name-status', '-r', commit]).trim(),
-      diff: git(['show', '--format=', '--find-renames', '--find-copies', commit]),
+      files: git(repoPath, ['diff-tree', '--no-commit-id', '--name-status', '-r', commit]).trim(),
+      diff: git(repoPath, ['show', '--format=', '--find-renames', '--find-copies', commit]),
     }
   })
 
-  process.stdout.write(JSON.stringify({ commits: result }, null, 2))
+  process.stdout.write(JSON.stringify({ repoPath, commits: result }, null, 2))
 }
 
 main().catch((error) => {
