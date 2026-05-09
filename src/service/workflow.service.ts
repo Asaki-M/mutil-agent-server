@@ -5,11 +5,16 @@ import type {
   WorkflowEdge,
   WorkflowEdgeCondition,
 } from '../model/workflow'
+import { createWorkflowRecord, findWorkflowRecordById } from '../dao/workflow.dao'
 import { WorkflowMgr } from '../manager/workflow'
 
 interface RunWorkflowInput {
-  dsl: WorkflowDSL
+  workflowId: string
   input: string
+}
+
+interface CreateWorkflowInput {
+  dsl: WorkflowDSL
 }
 
 const workflowMgr = new WorkflowMgr()
@@ -44,8 +49,14 @@ function normalizeWorkflowRunInput(body: unknown): RunWorkflowInput {
   }
 
   return {
-    dsl: normalizeWorkflowDSL(body.dsl),
+    workflowId: requireText(body.workflowId, 'workflowId'),
     input: requireText(body.input, 'input'),
+  }
+}
+
+function normalizeWorkflowCreateInput(body: unknown): CreateWorkflowInput {
+  return {
+    dsl: normalizeWorkflowDSL(body),
   }
 }
 
@@ -278,7 +289,13 @@ function normalizeMaxToolCalls(value: unknown, field: string): number | undefine
 
 async function runWorkflow(body: unknown) {
   const input = normalizeWorkflowRunInput(body)
-  const result = await workflowMgr.run(input.dsl, {
+  const workflow = await findWorkflowRecordById(input.workflowId)
+
+  if (workflow == null) {
+    throw new Error(`Workflow "${input.workflowId}" not found`)
+  }
+
+  const result = await workflowMgr.run(workflow.dsl, {
     input: input.input,
   })
 
@@ -288,6 +305,24 @@ async function runWorkflow(body: unknown) {
   }
 }
 
+async function createWorkflow(body: unknown) {
+  const input = normalizeWorkflowCreateInput(body)
+  const workflow = await createWorkflowRecord(input)
+
+  return {
+    success: true,
+    workflow: {
+      id: workflow.workflowId,
+      name: workflow.name,
+      description: workflow.description,
+      dsl: workflow.dsl,
+      createdAt: workflow.createdAt.toISOString(),
+      updatedAt: workflow.updatedAt.toISOString(),
+    },
+  }
+}
+
 export {
+  createWorkflow,
   runWorkflow,
 }

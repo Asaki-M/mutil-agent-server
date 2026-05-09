@@ -22,7 +22,8 @@
     "@google/genai": "^1.50.1",
     "@hono/node-server": "^1.19.0",
     "dotenv": "^17.2.3",
-    "hono": "^4.10.1"
+    "hono": "^4.10.1",
+    "mongodb": "^7.2.0"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^5.4.0",
