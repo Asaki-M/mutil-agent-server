@@ -21,7 +21,7 @@
             "description": "获取指定 git 仓库中一个或多个 commit 的元信息、变更文件列表和 diff。input 必须来自用户输入，示例：{\"repoPath\":\"/path/to/project\",\"commits\":[\"abc123\",\"def456\"]}",
             "action": {
               "type": "node",
-              "endpoint": "/Users/hujieming/Desktop/code/personal/multi-agent-server/example/scripts/get-commit-content.js",
+              "endpoint": "/path/to/multi-agent-server/example/scripts/get-commit-content.js",
               "params": {}
             }
           }
@@ -56,7 +56,7 @@
             "description": "本地 mock 推送工具，只把审查通过结果写入本地日志，不会请求真实外部系统。input 示例：{\"status\":\"PASS\",\"summary\":\"...\"}",
             "action": {
               "type": "node",
-              "endpoint": "/Users/hujieming/Desktop/code/personal/multi-agent-server/example/scripts/push-review-result.js",
+              "endpoint": "/path/to/multi-agent-server/example/scripts/push-review-result.js",
               "params": {
                 "status": "PASS",
                 "summary": "代码审查通过",
@@ -79,7 +79,7 @@
             "description": "写入代码审查 Markdown 报告。input 示例：{\"file\":\"example/reports/code-review-report.md\",\"markdown\":\"# Code Review Report\\n...\"}。file 可以来自用户输入的 reportFile。",
             "action": {
               "type": "node",
-              "endpoint": "/Users/hujieming/Desktop/code/personal/multi-agent-server/example/scripts/write-review-report.js",
+              "endpoint": "/path/to/multi-agent-server/example/scripts/write-review-report.js",
               "params": {
                 "file": "example/code-review-report.md"
               }
