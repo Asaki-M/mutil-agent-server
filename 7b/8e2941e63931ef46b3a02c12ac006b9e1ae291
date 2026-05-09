@@ -1,0 +1,24 @@
+example/code-review-workflow.dsl.json
+  s_357df06bdeedb3::t_6ffb5f0432473b 24,59,82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "7b8e2941e63931ef46b3a02c12ac006b9e1ae291",
+  "prompts": {},
+  "humans": {
+    "h_b690bb793b7533": {
+      "author": "Qinghuan <1041220793@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_357df06bdeedb3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e01c2-338f-7b11-9c1a-a491e87fb169",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Qinghuan <1041220793@qq.com>"
+    }
+  }
+}
